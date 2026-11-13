@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EYE-7 // Simulasi Pelacakan</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+  :root{
+    --bg:#04090b; --panel:#071317cc; --line:#0e3a40; --cy:#3df2ff; --cy2:#1aa7b3;
+    --red:#ff3b4e; --amb:#ffc23d; --txt:#b8f6fb; --dim:#5f9aa1;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--txt);font:12px/1.4 var(--mono);overflow:hidden}
+  #app{display:grid;height:100vh;grid-template-columns:260px 1fr 340px;grid-template-rows:44px 1fr 150px;
+       grid-template-areas:"top top top" "left map right" "left log right";gap:6px;padding:6px}
+  .panel{background:var(--panel);border:1px solid var(--line);position:relative;min-height:0;overflow:hidden}
+  .panel::before{content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(var(--cy) 0 0) top left/10px 1px no-repeat,linear-gradient(var(--cy) 0 0) top left/1px 10px no-repeat,
+               linear-gradient(var(--cy) 0 0) bottom right/10px 1px no-repeat,linear-gradient(var(--cy) 0 0) bottom right/1px 10px no-repeat;z-index:5}
+  h2{font-size:10px;letter-spacing:.2em;color:var(--cy2);font-weight:600;padding:8px 10px 6px;border-bottom:1px solid var(--line)}
+  #top{grid-area:top;display:flex;align-items:center;gap:14px;padding:0 12px}
+  #top .brand{color:var(--cy);letter-spacing:.35em;font-weight:700;font-size:14px;text-shadow:0 0 8px var(--cy)}
+  #top .sim{color:var(--amb);border:1px solid var(--amb);padding:2px 8px;font-size:10px;letter-spacing:.15em}
+  #top .stat{color:var(--dim)} #top .stat b{color:var(--cy);font-weight:600}
+  #top .sp{flex:1} #clock{color:var(--cy)}
+  #left{grid-area:left;display:flex;flex-direction:column}
+  #search{background:#020708;border:0;border-bottom:1px solid var(--line);color:var(--cy);font:inherit;padding:9px 10px;outline:none;width:100%}
+  #search::placeholder{color:var(--dim)}
+  #list{overflow:auto;flex:1}
+  .row{display:grid;grid-template-columns:1fr auto;padding:7px 10px;border-bottom:1px solid #0a2227;cursor:pointer}
+  .row:hover{background:#0b2a30} .row.sel{background:#0f3a42;box-shadow:inset 2px 0 var(--red)}
+  .row .id{color:var(--cy)} .row .meta{color:var(--dim);font-size:11px} .row .spd{color:var(--amb);align-self:center}
+  #mapwrap{grid-area:map} #map{position:absolute;inset:0;background:#05161a}
+  .leaflet-container{background:#05161a linear-gradient(#0e3a4033 1px,#0000 1px) 0 0/48px 48px,linear-gradient(90deg,#0e3a4033 1px,#0000 1px) 0 0/48px 48px;font:inherit}
+  .leaflet-bar a,.leaflet-bar a:hover{background:#071317;color:var(--cy);border-color:var(--line)}
+  .leaflet-tile{filter:brightness(1.1) saturate(.8) hue-rotate(160deg)}
+  #mapwrap::after{content:"";position:absolute;inset:0;z-index:4;pointer-events:none;
+    background:repeating-linear-gradient(0deg,#0000 0 2px,#0000002a 2px 3px),radial-gradient(ellipse at center,#0000 55%,#000a 100%)}
+  #sweep{position:absolute;left:0;right:0;height:80px;z-index:4;pointer-events:none;top:-80px;
+    background:linear-gradient(#3df2ff00,#3df2ff22,#3df2ff00);animation:sweep 6s linear infinite}
+  @keyframes sweep{to{top:100%}}
+  .tgt{width:14px;height:14px;margin:-7px 0 0 -7px;border:1px solid var(--cy);border-radius:50%;background:#3df2ff33;box-shadow:0 0 6px var(--cy)}
+  .tgt.lock{border-color:var(--red);background:#ff3b4e44;box-shadow:0 0 14px var(--red);width:26px;height:26px;margin:-13px 0 0 -13px;
+    animation:pulse 1s infinite}
+  @keyframes pulse{50%{transform:scale(1.35);opacity:.6}}
+  #hud{position:absolute;left:10px;top:10px;z-index:6;color:var(--cy);pointer-events:none;text-shadow:0 0 6px #000}
+  #hud .big{font-size:18px;letter-spacing:.15em} #hud .lock{color:var(--red)}
+  #log{grid-area:log;display:flex;flex-direction:column}
+  #logbody{flex:1;overflow:hidden;padding:6px 10px;display:flex;flex-direction:column;justify-content:flex-end;color:var(--cy2)}
+  #logbody div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis} #logbody .hit{color:var(--amb)} #logbody .lk{color:var(--red)}
+  #right{grid-area:right;display:flex;flex-direction:column}
+  #feeds{flex:1;display:grid;grid-template-rows:repeat(4,1fr);gap:6px;padding:6px;min-height:0}
+  .feed{position:relative;border:1px solid var(--line);min-height:0;background:#000}
+  .feed canvas{width:100%;height:100%;display:block}
+  .feed .cap{position:absolute;left:6px;top:4px;font-size:10px;color:var(--cy);text-shadow:0 0 4px #000}
+  .feed .rec{position:absolute;right:6px;top:4px;font-size:10px;color:var(--red)}
+  .feed.lock{border-color:var(--red)}
+  #boot{position:fixed;inset:0;z-index:99;background:#000;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;
+    color:var(--cy);transition:opacity .6s}
+  #boot .t{font-size:26px;letter-spacing:.5em;text-shadow:0 0 14px var(--cy)}
+  #boot pre{color:var(--cy2);min-height:100px;font:inherit}
+  #boot .warn{color:var(--amb);font-size:11px;margin-top:10px}
+  @media(max-width:900px){
+    #app{grid-template-columns:1fr;grid-template-rows:44px 55vh 130px 200px 220px;grid-template-areas:"top" "map" "log" "left" "right";overflow:auto;height:auto}
+    html,body{overflow:auto} #feeds{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+    #top .stat.hide-m{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="boot"><div class="t">EYE-7</div><pre id="bootlog"></pre>
+  <div class="warn">MODE SIMULASI &mdash; seluruh data, target, dan kamera di aplikasi ini fiktif</div></div>
+
+<div id="app">
+  <div id="top" class="panel">
+    <span class="brand">EYE-7</span><span class="sim">SIMULASI</span>
+    <span class="stat">NODE <b id="sNodes">0</b></span>
+    <span class="stat hide-m">TARGET <b id="sTgt">0</b></span>
+    <span class="stat hide-m">LATENSI <b id="sLat">0</b> ms</span>
+    <span class="sp"></span><span id="clock"></span>
+  </div>
+
+  <div id="left" class="panel">
+    <h2>DAFTAR TARGET</h2>
+    <input id="search" placeholder="cari ID / kode nama..." autocomplete="off">
+    <div id="list"></div>
+  </div>
+
+  <div id="mapwrap" class="panel">
+    <div id="map"></div><div id="sweep"></div>
+    <div id="hud"><div class="big" id="hudMain">PEMINDAIAN AKTIF</div><div id="hudSub">pilih target di daftar atau klik penanda di peta</div></div>
+  </div>
+
+  <div id="log" class="panel"><h2>LOG JARINGAN</h2><div id="logbody"></div></div>
+
+  <div id="right" class="panel"><h2>FEED KAMERA (SIMULASI)</h2><div id="feeds"></div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+(() => {
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  const hex = n => Array.from({length:n}, () => "0123456789ABCDEF"[Math.floor(Math.random()*16)]).join("");
+  const pad = (n, l=2) => String(n).padStart(l, "0");
+
+  // ---------- data fiktif ----------
+  const CITIES = [
+    {n:"JKT", name:"Jakarta",  lat:-6.20, lng:106.82},
+    {n:"BDG", name:"Bandung",  lat:-6.91, lng:107.61},
+    {n:"SMG", name:"Semarang", lat:-6.99, lng:110.42},
+    {n:"SBY", name:"Surabaya", lat:-7.25, lng:112.75},
+    {n:"MDN", name:"Medan",    lat: 3.59, lng: 98.67},
+    {n:"MKS", name:"Makassar", lat:-5.15, lng:119.43},
+  ];
+  const CODE = ["RAVEN","COBRA","GHOST","VIPER","NOMAD","FALCON","ONYX","LYNX","TITAN","ECHO","DELTA","ORCA"];
+  const TYPES = ["SEDAN","SUV","MOTOR","TRUK","VAN"];
+
+  const targets = [];
+  for (let i = 0; i < 28; i++) {
+    const c = pick(CITIES);
+    targets.push({
+      id: "T-" + hex(4), code: pick(CODE) + "-" + pad(i+1), type: pick(TYPES), city: c,
+      lat: c.lat + rnd(-.12, .12), lng: c.lng + rnd(-.12, .12),
+      hdg: rnd(0, Math.PI*2), spd: rnd(15, 90), trail: [], marker: null,
+    });
+  }
+  let locked = null;
+
+  // ---------- peta ----------
+  const map = L.map("map", {zoomControl:false, attributionControl:false}).setView([-6.9, 109.5], 6);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {maxZoom:18, subdomains:"abcd"}).addTo(map);
+  L.control.zoom({position:"bottomleft"}).addTo(map);
+
+  targets.forEach(t => {
+    t.marker = L.marker([t.lat, t.lng], {icon: L.divIcon({className:"", html:'<div class="tgt"></div>', iconSize:[0,0]})}).addTo(map);
+    t.marker.on("click", () => lockOn(t));
+    t.line = L.polyline([], {color:"#ff3b4e", weight:2, opacity:.8}).addTo(map);
+  });
+
+  function tick(dt) {
+    for (const t of targets) {
+      t.hdg += rnd(-.25, .25) * dt * 2;
+      const step = t.spd / 111000 * dt * 40;           // dipercepat agar terlihat bergerak
+      t.lat += Math.cos(t.hdg) * step; t.lng += Math.sin(t.hdg) * step;
+      // tarik pelan kembali ke kota asal supaya tidak kabur
+      t.lat += (t.city.lat - t.lat) * .0008; t.lng += (t.city.lng - t.lng) * .0008;
+      t.spd = Math.max(5, Math.min(110, t.spd + rnd(-3, 3)));
+      t.marker.setLatLng([t.lat, t.lng]);
+      if (t === locked) { t.trail.push([t.lat, t.lng]); if (t.trail.length > 400) t.trail.shift(); t.line.setLatLngs(t.trail); }
+    }
+    if (locked) map.panTo([locked.lat, locked.lng], {animate:true, duration:.4, noMoveStart:true});
+  }
+
+  function lockOn(t) {
+    if (locked) { locked.marker.getElement().firstChild.classList.remove("lock"); locked.line.setLatLngs([]); locked.trail = []; }
+    locked = t;
+    t.marker.getElement().firstChild.classList.add("lock");
+    map.flyTo([t.lat, t.lng], 13, {duration:1.6});
+    $("#hudMain").innerHTML = '<span class="lock">TARGET TERKUNCI</span> ' + t.id;
+    $("#hudSub").textContent = `${t.code} · ${t.type} · ${t.city.name} — jejak direkam, klik target lain untuk berpindah`;
+    log(`LOCK ${t.id} (${t.code}) — ${t.type} — ${t.city.name}`, "lk");
+    feeds.forEach((f, i) => f.assign(i === 0 ? t : null));
+    renderList();
+  }
+
+  // ---------- daftar ----------
+  const listEl = $("#list"), searchEl = $("#search");
+  function renderList() {
+    const q = searchEl.value.trim().toLowerCase();
+    listEl.innerHTML = "";
+    targets.filter(t => !q || t.id.toLowerCase().includes(q) || t.code.toLowerCase().includes(q) || t.city.name.toLowerCase().includes(q))
+      .forEach(t => {
+        const d = document.createElement("div"); d.className = "row" + (t === locked ? " sel" : "");
+        d.innerHTML = `<div><div class="id">${t.id} · ${t.code}</div><div class="meta">${t.type} · ${t.city.name}</div></div><div class="spd">${Math.round(t.spd)} km/j</div>`;
+        d.onclick = () => lockOn(t); listEl.appendChild(d);
+      });
+  }
+  searchEl.addEventListener("input", renderList);
+  setInterval(renderList, 1500);
+
+  // ---------- log ----------
+  const logEl = $("#logbody");
+  function log(msg, cls) {
+    const d = document.createElement("div"); if (cls) d.className = cls;
+    const n = new Date(); d.textContent = `[${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}] ${msg}`;
+    logEl.appendChild(d); while (logEl.children.length > 40) logEl.removeChild(logEl.firstChild);
+  }
+  const MSGS = [
+    () => `node 0x${hex(3)} handshake OK`,
+    () => `cam ${pick(CITIES).n}-${pad(Math.floor(rnd(1,99)),3)} online`,
+    () => `sinkronisasi cache ${hex(6)} selesai`,
+    () => `routing ulang paket via relay ${pick(CITIES).n}`,
+    () => `HIT ${pick(targets).id} confidence 0.${Math.floor(rnd(90,99))}`,
+  ];
+
+  // ---------- feed kamera (prosedural, tanpa wajah) ----------
+  function makeFeed(idx) {
+    const el = document.createElement("div"); el.className = "feed";
+    const cv = document.createElement("canvas"); cv.width = 320; cv.height = 150;
+    const cap = document.createElement("div"); cap.className = "cap";
+    const rec = document.createElement("div"); rec.className = "rec"; rec.textContent = "● REC";
+    el.append(cv, cap, rec); $("#feeds").appendChild(el);
+    const g = cv.getContext("2d");
+    const cars = Array.from({length:5}, () => ({x:rnd(0,320), lane:Math.floor(rnd(0,3)), v:rnd(30,90)*(Math.random()<.5?1:-1), id:hex(4), c:rnd(.55,.99)}));
+    const state = {target:null, camId:"", t:0};
+    function assign(t) {
+      state.target = t; el.classList.toggle("lock", !!t);
+      state.camId = (t ? t.city.n : pick(CITIES).n) + "-" + pad(Math.floor(rnd(1,99)),3);
+      cars.forEach(c => c.lockedCar = false);
+      if (t) { cars[0].lockedCar = true; cars[0].x = rnd(80, 200); }
+    }
+    assign(null);
+    function draw(dt) {
+      state.t += dt; const W = 320, H = 150;
+      g.fillStyle = "#02090b"; g.fillRect(0,0,W,H);
+      // jalan (perspektif sederhana)
+      g.strokeStyle = "#0e3a40"; g.lineWidth = 1;
+      for (let i = -3; i <= 3; i++) { g.beginPath(); g.moveTo(W/2 + i*8, 40); g.lineTo(W/2 + i*70, H); g.stroke(); }
+      g.beginPath(); g.moveTo(0,40); g.lineTo(W,40); g.stroke();
+      for (const c of cars) {
+        c.x += c.v * dt; if (c.x > W+40) c.x = -40; if (c.x < -40) c.x = W+40;
+        const y = 70 + c.lane*26, w = 34, h = 16;
+        g.fillStyle = "#0b2a30"; g.fillRect(c.x, y, w, h);
+        g.fillStyle = Math.random() < .02 ? "#fff" : "#2fb8c4"; g.fillRect(c.x + (c.v>0?w-4:0), y+3, 4, 4);
+        const isT = c.lockedCar && state.target;
+        g.strokeStyle = isT ? "#ff3b4e" : "#3df2ff"; g.lineWidth = isT ? 2 : 1;
+        g.strokeRect(c.x-3, y-3, w+6, h+6);
+        g.fillStyle = isT ? "#ff3b4e" : "#3df2ff"; g.font = "9px monospace";
+        g.fillText((isT ? state.target.id : "V-" + c.id) + " " + Math.round(c.c*100) + "%", c.x-3, y-6);
+      }
+      // noise + scanline
+      g.fillStyle = "#3df2ff10"; for (let i = 0; i < 30; i++) g.fillRect(Math.random()*W, Math.random()*H, 2, 1);
+      g.fillStyle = "#0000003a"; for (let y = 0; y < H; y += 3) g.fillRect(0, y, W, 1);
+      const n = new Date();
+      cap.textContent = `CAM ${state.camId}  ${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}` + (state.target ? "  ◉ TRACK" : "");
+      rec.style.opacity = Math.sin(state.t*4) > 0 ? 1 : .2;
+    }
+    return {assign, draw};
+  }
+  const feeds = [0,1,2,3].map(makeFeed);
+
+  // ---------- header ----------
+  let nodes = 0;
+  const nodesTarget = 1280 + Math.floor(rnd(0, 200));
+  $("#sTgt").textContent = targets.length;
+  function clock() { const n = new Date(); $("#clock").textContent = `${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())} ${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}`; }
+
+  // ---------- loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(.1, (now - last) / 1000); last = now;
+    feeds.forEach(f => f.draw(dt));
+    requestAnimationFrame(frame);
+  }
+  setInterval(() => tick(.5), 500);
+  setInterval(() => { nodes = Math.min(nodesTarget, nodes + Math.floor(rnd(20, 90))); $("#sNodes").textContent = nodes; $("#sLat").textContent = Math.floor(rnd(8, 42)); }, 700);
+  setInterval(() => { const m = pick(MSGS)(); log(m, m.startsWith("HIT") ? "hit" : ""); }, 1400);
+  setInterval(clock, 1000); clock();
+
+  // ---------- boot ----------
+  const BOOT = ["menginisialisasi inti simulasi...", "memuat 6 klaster kota (data fiktif)...", "membangkitkan 28 target sintetis...", "mengalibrasi feed kamera prosedural...", "SIAP."];
+  let bi = 0; const bl = $("#bootlog");
+  const bt = setInterval(() => {
+    bl.textContent += "> " + BOOT[bi++] + "\n";
+    if (bi >= BOOT.length) { clearInterval(bt); setTimeout(() => { $("#boot").style.opacity = 0; setTimeout(() => $("#boot").remove(), 650); }, 500); }
+  }, 380);
+
+  renderList(); log("sistem simulasi aktif");
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
